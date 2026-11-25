@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name for pre-release (e.g. v0.2.0-pre.1)'
+        description: 'Tag name for pre-release (e.g. v0.2.0-pre.5)'
         required: false
-        default: 'v0.2.0-pre.1'
+        default: 'v0.2.0-pre.5'
 
 permissions:
   contents: write
@@ -59,20 +59,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: Haven Pure Rust Native (Pre-Release)
+          name: Haven Pure Rust Native ${{ github.event.inputs.tag_name || github.ref_name || 'v0.2.0-pre.5' }} (Pre-Release)
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           body: |
-            ## 🚧 Haven Pure Rust Native - Pre-Release Build
-            * **Lưu ý:** Toàn bộ ứng dụng được release dưới dạng Thử nghiệm (Pre-release). Bản phát hành chính thức sẽ chỉ được xuất bản sau khi người dùng phê duyệt hoàn thành đầy đủ.
-            * **Đặc tính:** 100% Pure Rust Native Client (Zero Chromium / Zero WebView2), hiệu năng cực cao, RAM ~36MB.
-            * **Cải tiến & Sửa lỗi v0.2.0-pre.4:**
-              - **Phản hồi tức thì 0ms (Zero-Delay Architecture):** Chuyển toàn bộ cơ chế cache avatar và hình ảnh sang non-blocking in-memory + filesystem. Vòng lặp nhận WebSocket không bị chặn bởi HTTP fetch, chuyển kênh và nạp 80 tin nhắn hoàn tất trong 0ms.
-              - **Optimistic UI Chat:** Tin nhắn gửi đi hiển thị ngay lập tức trên màn hình trong 0ms, tự động khử trùng lặp (deduplicate) khi nhận xác nhận từ máy chủ.
-              - **Đồng bộ chọn kênh tức thì (Instant Channel Selection):** Nhấp chọn kênh văn bản hoặc kênh thoại sẽ kích hoạt hiệu ứng chọn (active state) ngay lập tức không bị delay hay kẹt ở kênh đầu tiên.
-              - **Nút "Tham gia Voice" & Khu vực Giọng nói:** Tích hợp nút kết nối thoại ở góc trên bên phải thanh tiêu đề và khu vực "GIỌNG NÓI" ở thanh thành viên bên phải, đồng bộ trạng thái kết nối thoại thời gian thực.
-              - **Trạng thái cá nhân (Custom Status):** Hiển thị đầy đủ trạng thái người dùng tại thanh UserBar góc dưới bên trái và danh sách thành viên.
-              - **Hiển thị Avatar đầy đủ:** Hỗ trợ GIF, WebP, PNG, JPG đã được kiểm chứng hoạt động mượt mà.
-              - **Bảo mật:** Vượt qua Cargo Audit (0 lỗ hổng bảo mật, ringbuf 0.5.3, chống Path Traversal).
+            ## Haven Pure Rust Native - Pre-Release Build
+            * **Note:** Released as a Pre-release preview build.
+            * **Architecture:** 100% Pure Rust Native Client (Zero Chromium / Zero WebView2, Slint UI + WASAPI audio + Win32 click-through overlay).
+            * **What's New in v0.2.0-pre.5 (Wave 2 UX & Reliability):**
+              - **Bounded LRU Channel History (`ChannelHistoryLru(12, 80)`):** Instant channel switching from lightweight `CachedMessageMeta` without pinning decoded RGBA image buffers past the 48 MB image cache limit.
+              - **`clientNonce` Optimistic Reconciliation:** Instant pending bubble rendering matched via echoed `clientNonce` (resilient to `display_name != username`), automatic removal on `error-msg`, and full UTC timestamp/avatar replacement upon confirmation.
+              - **Reconnect & Rapid-Switch Guards:** Clears stale channel cache on WebSocket connect/disconnect and validates active channel on UI dispatch to prevent cross-channel overwrites.
+              - **Safe UTF-8 Timestamp Formatting:** Non-panicking UTC `HH:MM` formatting and loading banner state cleanup on disconnect/error.
           prerelease: true
           draft: false
           files: |
