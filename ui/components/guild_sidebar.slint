@@ -1,0 +1,149 @@
+import { Theme } from "../theme.slint";
+
+export struct GuildItemData {
+    id: string,
+    name: string,
+    short-name: string,
+    icon-url: string,
+    unread-count: int,
+    is-selected: bool,
+}
+
+export component GuildSidebar inherits Rectangle {
+    width: 72px;
+    background: Theme.bg-guilds;
+
+    in-out property <string> active-guild-id: "haven-main";
+    in-out property <[GuildItemData]> guilds: [
+        { id: "haven-main", name: "Haven Official", short-name: "HV", unread-count: 0, is-selected: true },
+        { id: "gaming-hub", name: "Gaming Hub VN", short-name: "GH", unread-count: 3, is-selected: false },
+        { id: "music-lounge", name: "Haven Music", short-name: "HM", unread-count: 0, is-selected: false },
+    ];
+    callback guild-selected(string);
+
+    VerticalLayout {
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        // Haven Home Icon
+        Rectangle {
+            height: 48px;
+            width: 72px;
+
+            // Indicator pill
+            Rectangle {
+                x: 0px;
+                y: 12px;
+                width: 4px;
+                height: 24px;
+                background: Theme.text-white;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+            }
+
+            // Home Button
+            home-btn := Rectangle {
+                x: 12px;
+                width: 48px;
+                height: 48px;
+                border-radius: home-touch.has-hover ? 16px : 24px;
+                background: home-touch.has-hover ? Theme.blurple-hover : Theme.blurple;
+                animate border-radius { duration: 150ms; easing: ease-out; }
+                animate background { duration: 150ms; }
+
+                Text {
+                    text: "🏠";
+                    font-size: 20px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                home-touch := TouchArea {
+                    clicked => {
+                        root.active-guild-id = "home";
+                        root.guild-selected("home");
+                    }
+                }
+            }
+        }
+
+        // Divider
+        Rectangle {
+            height: 2px;
+            width: 32px;
+            x: 20px;
+            background: Theme.divider;
+        }
+
+        // Guilds List
+        for guild in guilds: Rectangle {
+            height: 48px;
+            width: 72px;
+            property <bool> is-active: (guild.id == root.active-guild-id) || (root.active-guild-id == "" && guild.is-selected);
+
+            // Left Pill Indicator
+            Rectangle {
+                x: 0px;
+                y: is-active ? 4px : (guild-touch.has-hover ? 14px : 20px);
+                width: 4px;
+                height: is-active ? 40px : (guild-touch.has-hover ? 20px : 8px);
+                background: Theme.text-white;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                opacity: is-active ? 1.0 : (guild-touch.has-hover ? 0.7 : 0.0);
+                animate height { duration: 150ms; easing: ease-out; }
+                animate opacity { duration: 150ms; }
+            }
+
+            // Guild Icon
+            guild-box := Rectangle {
+                x: 12px;
+                width: 48px;
+                height: 48px;
+                border-radius: is-active || guild-touch.has-hover ? 16px : 24px;
+                background: is-active ? Theme.blurple : (guild-touch.has-hover ? Theme.blurple : Theme.bg-channels);
+                animate border-radius { duration: 150ms; easing: ease-out; }
+                animate background { duration: 150ms; }
+
+                Text {
+                    text: guild.short-name;
+                    color: Theme.text-white;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                guild-touch := TouchArea {
+                    clicked => {
+                        root.active-guild-id = guild.id;
+                        root.guild-selected(guild.id);
+                    }
+                }
+            }
+
+            // Unread badge
+            if guild.unread-count > 0: Rectangle {
+                x: 44px;
+                y: 32px;
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                background: Theme.red;
+                border-width: 2px;
+                border-color: Theme.bg-guilds;
+
+                Text {
+                    text: guild.unread-count;
+                    color: Theme.text-white;
+                    font-size: 10px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

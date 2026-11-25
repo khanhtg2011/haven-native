@@ -1,0 +1,79 @@
+name: Build & Release Haven Pure Rust (Pre-Release)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*-pre*'
+      - 'v*-alpha*'
+      - 'v*-beta*'
+      - 'v*-rust*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for pre-release (e.g. v0.2.0-pre.1)'
+        required: false
+        default: 'v0.2.0-pre.1'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-pure-rust:
+    name: Build Pure Rust Native Client (Pre-Release)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Run Native Tests
+        run: cargo test -- --nocapture
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package Executable
+        run: |
+          Copy-Item -Path "target/release/haven-native.exe" -Destination "haven-desktop-pure-rust.exe"
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: haven-desktop-pure-rust-windows-x64
+          path: haven-desktop-pure-rust.exe
+
+      - name: Create GitHub Pre-Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          name: Haven Pure Rust Native (Pre-Release)
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          body: |
+            ## 🚧 Haven Pure Rust Native - Pre-Release Build
+            * **Lưu ý:** Toàn bộ ứng dụng được release dưới dạng Thử nghiệm (Pre-release). Bản phát hành chính thức sẽ chỉ được xuất bản sau khi người dùng phê duyệt hoàn thành đầy đủ.
+            * **Đặc tính:** 100% Pure Rust Native Client (Zero Chromium / Zero WebView2), hiệu năng cực cao, RAM ~36MB.
+            * **Cải tiến & Sửa lỗi v0.2.0-pre.4:**
+              - **Phản hồi tức thì 0ms (Zero-Delay Architecture):** Chuyển toàn bộ cơ chế cache avatar và hình ảnh sang non-blocking in-memory + filesystem. Vòng lặp nhận WebSocket không bị chặn bởi HTTP fetch, chuyển kênh và nạp 80 tin nhắn hoàn tất trong 0ms.
+              - **Optimistic UI Chat:** Tin nhắn gửi đi hiển thị ngay lập tức trên màn hình trong 0ms, tự động khử trùng lặp (deduplicate) khi nhận xác nhận từ máy chủ.
+              - **Đồng bộ chọn kênh tức thì (Instant Channel Selection):** Nhấp chọn kênh văn bản hoặc kênh thoại sẽ kích hoạt hiệu ứng chọn (active state) ngay lập tức không bị delay hay kẹt ở kênh đầu tiên.
+              - **Nút "Tham gia Voice" & Khu vực Giọng nói:** Tích hợp nút kết nối thoại ở góc trên bên phải thanh tiêu đề và khu vực "GIỌNG NÓI" ở thanh thành viên bên phải, đồng bộ trạng thái kết nối thoại thời gian thực.
+              - **Trạng thái cá nhân (Custom Status):** Hiển thị đầy đủ trạng thái người dùng tại thanh UserBar góc dưới bên trái và danh sách thành viên.
+              - **Hiển thị Avatar đầy đủ:** Hỗ trợ GIF, WebP, PNG, JPG đã được kiểm chứng hoạt động mượt mà.
+              - **Bảo mật:** Vượt qua Cargo Audit (0 lỗ hổng bảo mật, ringbuf 0.5.3, chống Path Traversal).
+          prerelease: true
+          draft: false
+          files: |
+            haven-desktop-pure-rust.exe

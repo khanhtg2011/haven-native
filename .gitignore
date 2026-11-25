@@ -1,0 +1,15 @@
+# Rust build & release artifacts
+target/
+*.exe
+*.pdb
+
+# Local runtime state & caches
+haven_session.json
+.cache/
+*.log
+
+# OS & editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

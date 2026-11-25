@@ -1,0 +1,457 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+
+export struct MessageData {
+    id: string,
+    author: string,
+    avatar-text: string,
+    avatar-color: color,
+    avatar-image: image,
+    has-avatar: bool,
+    timestamp: string,
+    content: string,
+    is-bot: bool,
+    is-attachment: bool,
+    attachment-url: string,
+    attachment-name: string,
+    is-image: bool,
+    image-data: image,
+    has-image: bool,
+    is-grouped: bool,
+}
+
+export component ChatArea inherits Rectangle {
+    background: Theme.bg-chat;
+
+    in-out property <string> channel-name: "general";
+    in-out property <string> channel-topic: "Kênh thảo luận cộng đồng Haven - 100% Native Rust Client";
+    in-out property <string> current-input: "";
+    in-out property <[MessageData]> messages: [];
+    in-out property <bool> is-voice-connected: false;
+
+    callback send-message(string);
+    callback pick-attachment();
+    callback open-attachment(string);
+    callback toggle-voice();
+
+    VerticalLayout {
+        // Chat Header
+        chat-header := Rectangle {
+            height: 48px;
+            background: Theme.bg-chat;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: space-between;
+
+                // Left: Channel name & topic
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    Text {
+                        text: "#";
+                        color: Theme.text-muted;
+                        font-size: 20px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: root.channel-name;
+                        color: Theme.text-white;
+                        font-size: 15px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+
+                    // Divider bar
+                    Rectangle {
+                        width: 1px;
+                        height: 16px;
+                        background: Theme.divider;
+                        y: 16px;
+                    }
+
+                    Text {
+                        text: root.channel-topic;
+                        color: Theme.text-muted;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                // Right: Action Icons (Voice Button, Search, Bell, Pin, Members)
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: center;
+
+                    // "Tham gia Voice" button matching Haven Web / Image 1
+                    Rectangle {
+                        height: 28px;
+                        border-radius: 4px;
+                        background: root.is-voice-connected ? #248046 : (voice-btn-touch.has-hover ? #35373c : #2b2d31);
+                        border-width: 1px;
+                        border-color: root.is-voice-connected ? #23a55a : #3f4147;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            alignment: center;
+
+                            Text {
+                                text: root.is-voice-connected ? "●" : "🎧";
+                                color: root.is-voice-connected ? #57f287 : Theme.text-white;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: root.is-voice-connected ? "Rời Voice" : "Tham gia Voice";
+                                color: Theme.text-white;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        voice-btn-touch := TouchArea {
+                            clicked => { root.toggle-voice(); }
+                        }
+                    }
+
+                    Text {
+                        text: "🔔";
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "📌";
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "👥";
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Header Divider
+        Rectangle {
+            height: 1px;
+            background: Theme.divider;
+        }
+
+        // Messages List (Virtualized ListView Viewport)
+        msg-flickable := ListView {
+            vertical-stretch: 1;
+
+            for msg in root.messages: Rectangle {
+                background: transparent;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: msg.is-grouped ? 2px : 8px;
+                    padding-bottom: 8px;
+                    spacing: 16px;
+                    alignment: start;
+
+                        // Avatar
+                        Rectangle {
+                            width: 40px;
+                            height: msg.is-grouped ? 0px : 40px;
+                            border-radius: 20px;
+                            background: msg.is-grouped ? transparent : msg.avatar-color;
+                            clip: true;
+
+                            if !msg.is-grouped && msg.has-avatar: Image {
+                                source: msg.avatar-image;
+                                width: 100%;
+                                height: 100%;
+                                image-fit: cover;
+                            }
+
+                            if !msg.is-grouped && !msg.has-avatar: Text {
+                                text: msg.avatar-text;
+                                color: Theme.text-white;
+                                font-size: 14px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Message Content Details
+                        VerticalLayout {
+                            spacing: msg.is-grouped ? 1px : 4px;
+                            alignment: start;
+
+                            // Author & Timestamp Row
+                            if !msg.is-grouped: HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                Text {
+                                    text: msg.author;
+                                    color: msg.is-bot ? #5865f2 : Theme.text-white;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+
+                                if msg.is-bot: Rectangle {
+                                    width: 32px;
+                                    height: 15px;
+                                    border-radius: 3px;
+                                    background: Theme.blurple;
+                                    y: 2px;
+
+                                    Text {
+                                        text: "BOT";
+                                        color: Theme.text-white;
+                                        font-size: 9px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Text {
+                                    text: msg.timestamp;
+                                    color: Theme.text-muted;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Message Text
+                            if msg.content != "": Text {
+                                text: msg.content;
+                                color: Theme.text-normal;
+                                font-size: 14px;
+                                wrap: word-wrap;
+                            }
+
+                            // Image Attachment (Direct Inline Image Viewer)
+                            if msg.is-attachment && msg.is-image: Rectangle {
+                                max-width: 440px;
+                                max-height: 260px;
+                                border-radius: 8px;
+                                background: #232428;
+                                clip: true;
+
+                                if msg.has-image: Image {
+                                    source: msg.image-data;
+                                    width: 100%;
+                                    height: 100%;
+                                    image-fit: contain;
+                                }
+
+                                if !msg.has-image: VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    padding: 16px;
+                                    Text {
+                                        text: "🖼️ " + msg.attachment-name;
+                                        color: Theme.blurple;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: "(Bấm để mở ảnh gốc)";
+                                        color: Theme.text-muted;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+
+                                img-touch := TouchArea {
+                                    clicked => { root.open-attachment(msg.attachment-url); }
+                                }
+                            }
+
+                            // Non-image File Attachment Card
+                            if msg.is-attachment && !msg.is-image: Rectangle {
+                                width: 300px;
+                                height: 52px;
+                                border-radius: 6px;
+                                background: #2b2d31;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 12px;
+                                    alignment: space-between;
+
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        alignment: start;
+                                        Text {
+                                            text: "📄";
+                                            font-size: 20px;
+                                            vertical-alignment: center;
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text {
+                                                text: msg.attachment-name;
+                                                color: Theme.blurple;
+                                                font-size: 13px;
+                                                font-weight: 600;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: "Tệp đính kèm Haven";
+                                                color: Theme.text-muted;
+                                                font-size: 11px;
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "⬇️ Tải";
+                                        color: Theme.text-white;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                file-touch := TouchArea {
+                                    clicked => { root.open-attachment(msg.attachment-url); }
+                                }
+                            }
+                        }
+                    }
+                }
+        }
+
+        // Chat Input Box (Discord-styled rounded container)
+        VerticalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-bottom: 20px;
+
+            input-box := Rectangle {
+                height: 44px;
+                border-radius: 8px;
+                background: Theme.bg-input;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 12px;
+
+                    // Plus Attachment Icon
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        border-radius: 12px;
+                        background: plus-touch.has-hover ? Theme.text-muted : #4e5058;
+                        y: (parent.height - self.height) / 2;
+
+                        Text {
+                            text: "+";
+                            color: Theme.bg-input;
+                            font-size: 18px;
+                            font-weight: 800;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        plus-touch := TouchArea {
+                            clicked => { root.pick-attachment(); }
+                        }
+                    }
+
+                    // Input Field Container (stretches to fill all remaining width)
+                    input-container := Rectangle {
+                        horizontal-stretch: 1;
+                        clip: true;
+
+                        if root.current-input == "": Text {
+                            x: 0px;
+                            y: (parent.height - self.height) / 2;
+                            text: "Gửi tin nhắn tới #" + root.channel-name;
+                            color: Theme.text-muted;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+
+                        text-input := TextInput {
+                            width: 100%;
+                            height: 100%;
+                            text <=> root.current-input;
+                            font-size: 14px;
+                            color: Theme.text-normal;
+                            vertical-alignment: center;
+                            accepted => {
+                                if (root.current-input != "") {
+                                    root.send-message(root.current-input);
+                                    root.current-input = "";
+                                }
+                            }
+                        }
+                    }
+
+                    // Right icons (Emoji, Send)
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: emoji-touch.has-hover ? Theme.bg-hover : transparent;
+
+                            Text {
+                                text: "😃";
+                                font-size: 16px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            emoji-touch := TouchArea {}
+                        }
+
+                        // Send Button
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: send-touch.has-hover ? Theme.blurple : transparent;
+
+                            Text {
+                                text: "➤";
+                                color: root.current-input != "" ? Theme.blurple : Theme.text-muted;
+                                font-size: 14px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            send-touch := TouchArea {
+                                clicked => {
+                                    if (root.current-input != "") {
+                                        root.send-message(root.current-input);
+                                        root.current-input = "";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

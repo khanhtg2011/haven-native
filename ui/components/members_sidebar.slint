@@ -1,0 +1,355 @@
+import { Theme } from "../theme.slint";
+
+export struct MemberData {
+    name: string,
+    role: string,
+    avatar-text: string,
+    avatar-color: color,
+    avatar-image: image,
+    has-avatar: bool,
+    status-color: color,
+    status-text: string,
+    is-bot: bool,
+}
+
+export component MembersSidebar inherits Rectangle {
+    width: 240px;
+    background: Theme.bg-channels;
+
+    in-out property <[MemberData]> online-members: [];
+    in-out property <[MemberData]> offline-members: [];
+    in-out property <bool> is-voice-connected: false;
+    in-out property <string> active-voice-channel: "";
+
+    callback toggle-voice();
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Flickable {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                padding-top: 16px;
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-bottom: 16px;
+                spacing: 4px;
+                alignment: start;
+
+                // Voice Section matching Haven Web / Image 1
+                VerticalLayout {
+                    spacing: 4px;
+                    padding-bottom: 8px;
+
+                    Text {
+                        text: "▾ GIỌNG NÓI";
+                        color: Theme.text-muted;
+                        font-size: 11px;
+                        font-weight: 700;
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        border-radius: 4px;
+                        background: root.is-voice-connected ? #248046 : (voice-side-touch.has-hover ? #35373c : #2b2d31);
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            alignment: start;
+
+                            Text {
+                                text: root.is-voice-connected ? "●" : "🎧";
+                                color: root.is-voice-connected ? #57f287 : Theme.text-white;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: root.is-voice-connected ? (root.active-voice-channel != "" ? root.active-voice-channel : "Voice đã kết nối") : "Tham gia Voice";
+                                color: Theme.text-white;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        voice-side-touch := TouchArea {
+                            clicked => { root.toggle-voice(); }
+                        }
+                    }
+                }
+
+                Rectangle { height: 4px; }
+
+            // Search input
+            Rectangle {
+                height: 32px;
+                border-radius: 4px;
+                background: #1e1f22;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    Text {
+                        text: "🔍";
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "Tìm kiếm thành viên...";
+                        color: Theme.text-muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle { height: 8px; }
+
+            // Online Header
+            Text {
+                text: "TRỰC TUYẾN (" + root.online-members.length + ")";
+                color: Theme.text-muted;
+                font-size: 11px;
+                font-weight: 700;
+            }
+
+            for member in root.online-members: Rectangle {
+                height: 42px;
+                border-radius: 4px;
+                background: member-touch.has-hover ? Theme.bg-hover : transparent;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 10px;
+                    alignment: start;
+
+                    // Avatar with status dot
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        y: 5px;
+
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: member.avatar-color;
+                            clip: true;
+
+                            if member.has-avatar: Image {
+                                source: member.avatar-image;
+                                width: 100%;
+                                height: 100%;
+                                image-fit: cover;
+                            }
+
+                            if !member.has-avatar: Text {
+                                text: member.avatar-text;
+                                color: Theme.text-white;
+                                font-size: 12px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Status dot (Green for online)
+                        Rectangle {
+                            x: 22px;
+                            y: 22px;
+                            width: 10px;
+                            height: 10px;
+                            border-radius: 5px;
+                            background: member.status-color;
+                            border-width: 2px;
+                            border-color: Theme.bg-channels;
+                        }
+                    }
+
+                    // Member Name & Subtitle
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: member.name;
+                                color: member.is-bot ? #5865f2 : Theme.text-white;
+                                font-size: 13px;
+                                font-weight: 600;
+                            }
+
+                            if member.is-bot: Rectangle {
+                                width: 28px;
+                                height: 14px;
+                                border-radius: 3px;
+                                background: Theme.blurple;
+                                y: 2px;
+
+                                Text {
+                                    text: "BOT";
+                                    color: Theme.text-white;
+                                    font-size: 8px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        if member.status-text != "": Text {
+                            text: member.status-text;
+                            color: Theme.text-muted;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                member-touch := TouchArea {}
+            }
+
+            // Offline Header
+            if root.offline-members.length > 0: Rectangle {
+                height: 24px;
+                background: transparent;
+                Text {
+                    y: 8px;
+                    text: "NGOẠI TUYẾN (" + root.offline-members.length + ")";
+                    color: Theme.text-muted;
+                    font-size: 11px;
+                    font-weight: 700;
+                }
+            }
+
+            for member in root.offline-members: Rectangle {
+                height: 40px;
+                border-radius: 4px;
+                opacity: 0.65;
+                background: off-touch.has-hover ? Theme.bg-hover : transparent;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 10px;
+                    alignment: start;
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        y: 4px;
+
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: #4e5058;
+                            clip: true;
+
+                            if member.has-avatar: Image {
+                                source: member.avatar-image;
+                                width: 100%;
+                                height: 100%;
+                                image-fit: cover;
+                            }
+
+                            if !member.has-avatar: Text {
+                                text: member.avatar-text;
+                                color: Theme.text-muted;
+                                font-size: 12px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            x: 22px;
+                            y: 22px;
+                            width: 10px;
+                            height: 10px;
+                            border-radius: 5px;
+                            background: #80848e;
+                            border-width: 2px;
+                            border-color: Theme.bg-channels;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+
+                        Text {
+                            text: member.name;
+                            color: Theme.text-muted;
+                            font-size: 13px;
+                            font-weight: 500;
+                        }
+
+                        if member.status-text != "": Text {
+                            text: member.status-text;
+                            color: Theme.text-muted;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                off-touch := TouchArea {}
+            }
+        }
+    }
+
+        // Bottom Action Bar
+        Rectangle {
+            height: 52px;
+            background: #232428;
+
+            VerticalLayout {
+                alignment: center;
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 4px;
+
+                Rectangle {
+                    height: 28px;
+                    border-radius: 4px;
+                    background: btn-invite.has-hover ? #2e3035 : transparent;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        Text {
+                            text: "👥";
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: "Mời người dùng";
+                            color: Theme.text-white;
+                            font-size: 13px;
+                            font-weight: 500;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    btn-invite := TouchArea {}
+                }
+            }
+        }
+    }
+}

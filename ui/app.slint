@@ -1,0 +1,226 @@
+import { Theme } from "theme.slint";
+import { GuildSidebar, GuildItemData } from "components/guild_sidebar.slint";
+import { ChannelList, ChannelItemData } from "components/channel_list.slint";
+import { ChatArea, MessageData } from "components/chat_area.slint";
+import { MembersSidebar, MemberData } from "components/members_sidebar.slint";
+import { LoginView } from "components/login_view.slint";
+
+export { MessageData, GuildItemData, ChannelItemData, MemberData }
+
+export component MainWindow inherits Window {
+    title: "Haven Native (100% Pure Rust - Zero WebView2)";
+    min-width: 960px;
+    min-height: 600px;
+    preferred-width: 1200px;
+    preferred-height: 720px;
+    default-font-family: "Segoe UI";
+    background: Theme.bg-chat;
+
+    in-out property <bool> is-logged-in: false;
+    in-out property <string> login-error: "";
+    in-out property <bool> login-loading: false;
+
+    in-out property <string> active-channel-code: "";
+    in-out property <string> active-channel-name: "general";
+    in-out property <string> active-guild: "haven-main";
+
+    in-out property <string> current-username: "HavenUser";
+    in-out property <string> user-status: "Online";
+    in-out property <image> current-user-avatar;
+    in-out property <bool> has-current-user-avatar: false;
+    in-out property <string> current-user-avatar-text: "HU";
+    in-out property <color> current-user-avatar-color: Theme.blurple;
+    in-out property <string> server-name: "Haven Official";
+    in-out property <string> channel-topic: "Kênh thảo luận cộng đồng Haven - 100% Native Rust Client";
+    in-out property <[ChannelItemData]> text-channels: [];
+    in-out property <[ChannelItemData]> voice-channels: [];
+    in-out property <[MessageData]> messages: [];
+    in-out property <[MemberData]> online-members: [];
+    in-out property <[MemberData]> offline-members: [];
+    in-out property <bool> is-muted: false;
+    in-out property <bool> is-deafened: false;
+    in-out property <bool> is-voice-connected: false;
+    in-out property <string> active-voice-channel: "";
+    in-out property <int> voice-ping-ms: 18;
+
+    callback do-login(string, string);
+    callback send-message(string);
+    callback channel-selected(string, bool);
+    callback disconnect-voice();
+    callback toggle-voice();
+    callback pick-attachment();
+    callback open-attachment(string);
+    callback guild-selected(string);
+    callback toggle-mute();
+    callback toggle-deafen();
+    callback open-settings();
+
+    if !root.is-logged-in: LoginView {
+        error-message: root.login-error;
+        is-loading: root.login-loading;
+        do-login(u, p) => {
+            root.do-login(u, p);
+        }
+    }
+
+    if root.is-logged-in: VerticalLayout {
+        spacing: 0px;
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 0px;
+
+            // 1. Guilds Sidebar (72px)
+            guild-sidebar := GuildSidebar {
+                guild-selected(id) => {
+                    root.active-guild = id;
+                    root.guild-selected(id);
+                }
+            }
+
+            // 2. Channels List & User Bar (240px)
+            channel-list := ChannelList {
+                server-name: root.server-name;
+                current-username: root.current-username;
+                user-status: root.user-status;
+                user-avatar-image: root.current-user-avatar;
+                has-user-avatar: root.has-current-user-avatar;
+                user-avatar-text: root.current-user-avatar-text;
+                user-avatar-color: root.current-user-avatar-color;
+                text-channels: root.text-channels;
+                voice-channels: root.voice-channels;
+                active-channel-id <=> root.active-channel-code;
+                is-muted: root.is-muted;
+                is-deafened: root.is-deafened;
+                is-voice-connected: root.is-voice-connected;
+                active-voice-channel: root.active-voice-channel;
+                voice-ping-ms: root.voice-ping-ms;
+                open-settings => { root.open-settings(); }
+                toggle-mute => { root.toggle-mute(); }
+                toggle-deafen => { root.toggle-deafen(); }
+                disconnect-voice => { root.disconnect-voice(); }
+                channel-selected(id, is-voice) => {
+                    root.active-channel-code = id;
+                    root.channel-selected(id, is-voice);
+                }
+            }
+
+            // 3. Main Chat Viewport
+            chat-area := ChatArea {
+                channel-name: root.active-channel-name;
+                channel-topic: root.channel-topic;
+                messages: root.messages;
+                is-voice-connected: root.is-voice-connected;
+                toggle-voice => { root.toggle-voice(); }
+                send-message(text) => {
+                    root.send-message(text);
+                }
+                pick-attachment => {
+                    root.pick-attachment();
+                }
+                open-attachment(url) => {
+                    root.open-attachment(url);
+                }
+            }
+
+            // 4. Right Members Sidebar (240px)
+            members-sidebar := MembersSidebar {
+                online-members: root.online-members;
+                offline-members: root.offline-members;
+                is-voice-connected: root.is-voice-connected;
+                active-voice-channel: root.active-voice-channel;
+                toggle-voice => { root.toggle-voice(); }
+            }
+        }
+
+        // 5. Bottom Status Bar (Matching Haven Parity)
+        Rectangle {
+            height: 24px;
+            background: #111214;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+                alignment: space-between;
+
+                // Left stats
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+
+                    Rectangle {
+                        y: 7px;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: #23a55a;
+                    }
+
+                    Text {
+                        text: "SERVER ĐÃ KẾT NỐI";
+                        color: #23a55a;
+                        font-size: 10px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "•";
+                        color: #4e5058;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "PING " + root.voice-ping-ms + " MS";
+                        color: #949ba4;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "•";
+                        color: #4e5058;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "CHANNEL #" + root.active-channel-name;
+                        color: #949ba4;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "•";
+                        color: #4e5058;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "ONLINE " + root.online-members.length;
+                        color: #949ba4;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Right stats
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+
+                    Text {
+                        text: "v0.7.0";
+                        color: #5c5f66;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

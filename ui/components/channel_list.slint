@@ -1,0 +1,276 @@
+import { Theme } from "../theme.slint";
+import { UserBar } from "user_bar.slint";
+
+export struct ChannelItemData {
+    id: string,
+    name: string,
+    is-voice: bool,
+    is-selected: bool,
+    unread: bool,
+}
+
+export component ChannelList inherits Rectangle {
+    width: 240px;
+    background: Theme.bg-channels;
+
+    in-out property <string> server-name: "Haven Official";
+    in-out property <[ChannelItemData]> text-channels: [
+        { id: "general", name: "general", is-voice: false, is-selected: true, unread: false },
+        { id: "announcements", name: "thông-báo", is-voice: false, is-selected: false, unread: true },
+        { id: "dev-chat", name: "dev-rust-native", is-voice: false, is-selected: false, unread: false },
+    ];
+    in-out property <[ChannelItemData]> voice-channels: [
+        { id: "voice-general", name: "Voice Chung 1", is-voice: true, is-selected: false, unread: false },
+        { id: "gaming-room", name: "Phòng Game 3 AE", is-voice: true, is-selected: false, unread: false },
+        { id: "music-room", name: "Music Bot Lounge", is-voice: true, is-selected: false, unread: false },
+    ];
+
+    in-out property <string> active-channel-id: "";
+    in-out property <string> active-voice-id: "";
+    in-out property <string> user-status: "Online";
+    in-out property <bool> is-voice-connected: false;
+    in-out property <string> active-voice-channel: "";
+    in-out property <int> voice-ping-ms: 18;
+    in-out property <bool> is-muted: false;
+    in-out property <bool> is-deafened: false;
+    in-out property <string> current-username: "HavenUser";
+    in-out property <image> user-avatar-image;
+    in-out property <bool> has-user-avatar: false;
+    in-out property <string> user-avatar-text: "HU";
+    in-out property <color> user-avatar-color: Theme.blurple;
+
+    callback channel-selected(string, bool);
+    callback disconnect-voice();
+    callback toggle-mute();
+    callback toggle-deafen();
+    callback open-settings();
+
+    VerticalLayout {
+        // Server Header Dropdown
+        server-header := Rectangle {
+            height: 48px;
+            background: header-touch.has-hover ? Theme.bg-hover : transparent;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: space-between;
+
+                Text {
+                    text: root.server-name;
+                    color: Theme.text-white;
+                    font-size: 15px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "⌄";
+                    color: Theme.text-muted;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            header-touch := TouchArea {}
+        }
+
+        // Header Divider
+        Rectangle {
+            height: 1px;
+            background: Theme.divider;
+        }
+
+        // Channel Scrollable / List Area
+        Flickable {
+            VerticalLayout {
+                padding-top: 12px;
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 2px;
+                alignment: start;
+
+                // Category: TEXT CHANNELS
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-bottom: 4px;
+                    Text {
+                        text: "⌄ TEXT CHANNELS";
+                        color: Theme.text-muted;
+                        font-size: 11px;
+                        font-weight: 700;
+                    }
+                }
+
+                for ch in text-channels: Rectangle {
+                    height: 34px;
+                    border-radius: 4px;
+                    property <bool> is-active: (ch.id == root.active-channel-id) || (root.active-channel-id == "" && ch.is-selected);
+                    background: is-active ? Theme.bg-active : (ch-touch.has-hover ? Theme.bg-hover : transparent);
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        Text {
+                            text: "#";
+                            color: is-active ? Theme.text-white : Theme.text-muted;
+                            font-size: 18px;
+                            font-weight: 500;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: ch.name;
+                            color: is-active ? Theme.text-white : (ch.unread ? Theme.text-white : Theme.text-normal);
+                            font-size: 14px;
+                            font-weight: is-active || ch.unread ? 600 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    ch-touch := TouchArea {
+                        clicked => {
+                            root.active-channel-id = ch.id;
+                            root.channel-selected(ch.id, false);
+                        }
+                    }
+                }
+
+                // Category: VOICE CHANNELS
+                HorizontalLayout {
+                    padding-top: 16px;
+                    padding-left: 8px;
+                    padding-bottom: 4px;
+                    Text {
+                        text: "⌄ VOICE CHANNELS";
+                        color: Theme.text-muted;
+                        font-size: 11px;
+                        font-weight: 700;
+                    }
+                }
+
+                for ch in voice-channels: Rectangle {
+                    height: 34px;
+                    border-radius: 4px;
+                    property <bool> is-active: (ch.id == root.active-voice-id);
+                    background: is-active ? Theme.bg-active : (vch-touch.has-hover ? Theme.bg-hover : transparent);
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        Text {
+                            text: "🔊";
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: ch.name;
+                            color: is-active ? Theme.text-white : Theme.text-normal;
+                            font-size: 14px;
+                            font-weight: is-active ? 600 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    vch-touch := TouchArea {
+                        clicked => {
+                            root.active-voice-id = ch.id;
+                            root.channel-selected(ch.id, true);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Voice Connected Panel (Shows when connected)
+        if root.is-voice-connected: Rectangle {
+            height: 52px;
+            background: #111214;
+
+            // Top border divider
+            Rectangle {
+                y: 0px;
+                height: 1px;
+                background: Theme.divider;
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                alignment: space-between;
+
+                // Voice status details
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: Theme.green;
+                            y: 4px;
+                        }
+
+                        Text {
+                            text: "Voice Connected";
+                            color: Theme.green;
+                            font-size: 12px;
+                            font-weight: 700;
+                        }
+                    }
+
+                    Text {
+                        text: root.active-voice-channel + " / " + root.voice-ping-ms + "ms";
+                        color: Theme.text-muted;
+                        font-size: 11px;
+                    }
+                }
+
+                // Disconnect Button
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 4px;
+                    background: disc-touch.has-hover ? Theme.bg-hover : transparent;
+
+                    Text {
+                        text: "📞";
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    disc-touch := TouchArea {
+                        clicked => { root.disconnect-voice(); }
+                    }
+                }
+            }
+        }
+
+        // Discord User Profile Bar at bottom
+        user-bar := UserBar {
+            username <=> root.current-username;
+            user-status: root.user-status;
+            avatar-image: root.user-avatar-image;
+            has-avatar: root.has-user-avatar;
+            avatar-text: root.user-avatar-text;
+            avatar-color: root.user-avatar-color;
+            is-muted <=> root.is-muted;
+            is-deafened <=> root.is-deafened;
+            toggle-mute => { root.toggle-mute(); }
+            toggle-deafen => { root.toggle-deafen(); }
+            open-settings => { root.open-settings(); }
+        }
+    }
+}

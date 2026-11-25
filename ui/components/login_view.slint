@@ -1,0 +1,228 @@
+import { Theme } from "../theme.slint";
+
+export component LoginView inherits Rectangle {
+    background: #1e1f22;
+
+    in-out property <string> username: "";
+    in-out property <string> password: "";
+    in-out property <string> error-message: "";
+    in-out property <bool> is-loading: false;
+
+    callback do-login(string, string);
+    callback login-as-guest();
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 0px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            // Center Login Card
+            Rectangle {
+                width: 480px;
+                border-radius: 12px;
+                background: #2b2d31;
+                border-width: 1px;
+                border-color: #35373c;
+
+                VerticalLayout {
+                    padding: 32px;
+                    spacing: 20px;
+                    alignment: start;
+
+                    // Header
+                    VerticalLayout {
+                        spacing: 8px;
+                        alignment: center;
+
+                        Text {
+                            text: "Chào mừng trở lại!";
+                            color: Theme.text-white;
+                            font-size: 22px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "Đăng nhập vào máy chủ Haven (3 AE Siêu nhân)";
+                            color: Theme.text-muted;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                        }
+                    }
+
+                    // Error Message (if any)
+                    if root.error-message != "": Rectangle {
+                        height: 36px;
+                        border-radius: 6px;
+                        background: rgba(242, 63, 67, 0.15);
+                        border-width: 1px;
+                        border-color: Theme.red;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            alignment: start;
+
+                            Text {
+                                text: "⚠️ " + root.error-message;
+                                color: Theme.red;
+                                font-size: 13px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Form Group: Username
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "TÊN ĐĂNG NHẬP (USERNAME)";
+                            color: #b5bac1;
+                            font-size: 12px;
+                            font-weight: 700;
+                        }
+
+                        Rectangle {
+                            height: 42px;
+                            border-radius: 4px;
+                            background: #1e1f22;
+                            border-width: 1px;
+                            border-color: user-input.has-focus ? Theme.blurple : #232428;
+
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+
+                                user-input := TextInput {
+                                    text <=> root.username;
+                                    color: Theme.text-white;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Form Group: Password
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "MẬT KHẨU (PASSWORD)";
+                            color: #b5bac1;
+                            font-size: 12px;
+                            font-weight: 700;
+                        }
+
+                        Rectangle {
+                            height: 42px;
+                            border-radius: 4px;
+                            background: #1e1f22;
+                            border-width: 1px;
+                            border-color: pass-input.has-focus ? Theme.blurple : #232428;
+
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+
+                                pass-input := TextInput {
+                                    text <=> root.password;
+                                    input-type: InputType.password;
+                                    color: Theme.text-white;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    accepted => {
+                                        if (root.username != "" && root.password != "") {
+                                            root.do-login(root.username, root.password);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Login Button
+                    login-btn := Rectangle {
+                        height: 44px;
+                        border-radius: 4px;
+                        background: login-touch.has-hover ? Theme.blurple-hover : Theme.blurple;
+                        animate background { duration: 150ms; }
+
+                        Text {
+                            text: root.is-loading ? "Đang xác thực..." : "Đăng nhập";
+                            color: Theme.text-white;
+                            font-size: 15px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        login-touch := TouchArea {
+                            clicked => {
+                                if (root.username != "" && root.password != "" && !root.is-loading) {
+                                    root.do-login(root.username, root.password);
+                                }
+                            }
+                        }
+                    }
+
+                    // Divider or Option
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+
+                        Rectangle {
+                            height: 1px;
+                            width: 140px;
+                            background: Theme.divider;
+                            y: 8px;
+                        }
+                        Text {
+                            text: "HOẶC";
+                            color: Theme.text-muted;
+                            font-size: 11px;
+                            font-weight: 700;
+                        }
+                        Rectangle {
+                            height: 1px;
+                            width: 140px;
+                            background: Theme.divider;
+                            y: 8px;
+                        }
+                    }
+
+                    // Fast Demo / Bot Account Button
+                    Rectangle {
+                        height: 38px;
+                        border-radius: 4px;
+                        background: demo-touch.has-hover ? #35373c : #232428;
+                        border-width: 1px;
+                        border-color: #3f4147;
+                        animate background { duration: 150ms; }
+
+                        Text {
+                            text: "⚡ Vào nhanh bằng tài khoản test (rust_native_bot)";
+                            color: Theme.text-normal;
+                            font-size: 13px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        demo-touch := TouchArea {
+                            clicked => {
+                                root.username = "rust_native_bot";
+                                root.password = "Password123!@#";
+                                root.do-login("rust_native_bot", "Password123!@#");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
