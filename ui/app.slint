@@ -42,6 +42,7 @@ export component MainWindow inherits Window {
     in-out property <bool> is-voice-connected: false;
     in-out property <string> active-voice-channel: "";
     in-out property <int> voice-ping-ms: 18;
+    in-out property <bool> is-loading-channel: false;
 
     callback do-login(string, string);
     callback send-message(string);
@@ -111,6 +112,7 @@ export component MainWindow inherits Window {
                 channel-topic: root.channel-topic;
                 messages: root.messages;
                 is-voice-connected: root.is-voice-connected;
+                is-loading-channel: root.is-loading-channel;
                 toggle-voice => { root.toggle-voice(); }
                 send-message(text) => {
                     root.send-message(text);

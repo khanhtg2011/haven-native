@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use haven_native::cache::{DecodedImageEntry, ImageCacheManager};
-use haven_native::lock_or_recover;
+use haven_native::{ChannelHistoryLru, find_reconcile_optimistic_index, lock_or_recover};
 use serde::{Deserialize, Serialize};
 use slint::{Color, Model, VecModel};
 use tokio::sync::mpsc;
@@ -92,6 +92,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let active_channel_code = Arc::new(Mutex::new(String::new()));
     let active_voice_code = Arc::new(Mutex::new(String::new()));
     let channels_cache = Arc::new(Mutex::new(Vec::<ChannelItem>::new()));
+    let channel_history_cache = Arc::new(Mutex::new(ChannelHistoryLru::<ProcessedMessage>::new(12, 80)));
     let socket_client_holder = Arc::new(Mutex::new(Option::<Arc<HavenSocketClient>>::None));
     let current_token = Arc::new(Mutex::new(String::new()));
     let api_client = Arc::new(HavenApiClient::new(BASE_URL));
@@ -467,6 +468,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let active_channel_code = active_channel_code.clone();
         let active_voice_code = active_voice_code.clone();
         let channels_cache = channels_cache.clone();
+        let channel_history_cache = channel_history_cache.clone();
         let current_token = current_token.clone();
         let user_avatars = user_avatars.clone();
         let cache_mgr = cache_mgr.clone();
@@ -480,6 +482,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             let active_channel_code = active_channel_code.clone();
             let active_voice_code = active_voice_code.clone();
             let channels_cache = channels_cache.clone();
+            let channel_history_cache = channel_history_cache.clone();
             let current_token = current_token.clone();
             let user_avatars = user_avatars.clone();
             let cache_mgr = cache_mgr.clone();
@@ -513,6 +516,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                             active_channel_code,
                             active_voice_code,
                             channels_cache,
+                            channel_history_cache,
                             user_avatars,
                             cache_mgr,
                         ).await;
@@ -594,6 +598,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                             image_data: slint::Image::default(),
                             has_image: false,
                             is_grouped,
+                            is_pending: true,
                         };
 
                         m.push(opt_msg);
@@ -705,6 +710,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let active_channel_code = active_channel_code.clone();
         let active_voice_code = active_voice_code.clone();
         let channels_cache = channels_cache.clone();
+        let channel_history_cache = channel_history_cache.clone();
         let audio_engine = audio_engine.clone();
         let audio_channels = audio_channels.clone();
         let window_weak = main_window.as_weak();
@@ -732,18 +738,27 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                     let cache = lock_or_recover(&channels_cache);
                     cache.iter().find(|c| c.code == code).map(|c| (c.name.clone(), c.topic.clone().unwrap_or_default()))
                 };
+                let cached_history = lock_or_recover(&channel_history_cache).get(&code);
 
-                if let Some((name, topic)) = ch_name {
-                    let window_weak = window_weak.clone();
-                    let code_clone = code.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(window) = window_weak.upgrade() {
-                            window.set_active_channel_code(code_clone.into());
+                let window_weak_ui = window_weak.clone();
+                let code_clone = code.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(window) = window_weak_ui.upgrade() {
+                        window.set_active_channel_code(code_clone.into());
+                        if let Some((name, topic)) = ch_name {
                             window.set_active_channel_name(name.into());
                             window.set_channel_topic(topic.into());
                         }
-                    });
-                }
+                        if let Some(cached_msgs) = cached_history {
+                            let slint_msgs: Vec<MessageData> = cached_msgs.into_iter().map(to_slint_message).collect();
+                            mutate_vec_model(window.get_messages(), |m| window.set_messages(m), |m| m.set_vec(slint_msgs));
+                            window.set_is_loading_channel(false);
+                        } else {
+                            mutate_vec_model(window.get_messages(), |m| window.set_messages(m), |m| m.set_vec(Vec::new()));
+                            window.set_is_loading_channel(true);
+                        }
+                    }
+                });
 
                 let holder = lock_or_recover(&socket_client_holder);
                 if let Some(client) = holder.as_ref() {
@@ -790,6 +805,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let active_channel_code = active_channel_code.clone();
                 let active_voice_code = active_voice_code.clone();
                 let channels_cache = channels_cache.clone();
+                let channel_history_cache = channel_history_cache.clone();
                 let user_avatars = user_avatars.clone();
                 let cache_mgr = cache_mgr.clone();
 
@@ -802,6 +818,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                         active_channel_code,
                         active_voice_code,
                         channels_cache,
+                        channel_history_cache,
                         user_avatars,
                         cache_mgr,
                     ).await;
@@ -824,6 +841,7 @@ async fn start_socket_session(
     active_channel_code: Arc<Mutex<String>>,
     active_voice_code: Arc<Mutex<String>>,
     channels_cache: Arc<Mutex<Vec<ChannelItem>>>,
+    channel_history_cache: Arc<Mutex<ChannelHistoryLru<ProcessedMessage>>>,
     user_avatars: Arc<Mutex<HashMap<String, String>>>,
     cache_mgr: Arc<ImageCacheManager>,
 ) {
@@ -976,34 +994,37 @@ async fn start_socket_session(
                     }
                     HavenEvent::MessageHistory(history) => {
                         let cur_code = lock_or_recover(&active_channel_code).clone();
+                        let mut processed = Vec::new();
+                        let mut prev_author: Option<String> = None;
+                        for m in history.messages {
+                            let author = m.username.clone().unwrap_or_default();
+                            let is_grouped = prev_author.as_ref() == Some(&author) && !author.is_empty();
+                            prev_author = Some(author);
+                            let mut pm = process_message(m, &cache_mgr, &user_avatars);
+                            pm.is_grouped = is_grouped;
+                            processed.push(pm);
+                        }
+                        lock_or_recover(&channel_history_cache).put(history.channel_code.clone(), processed.clone());
                         if history.channel_code == cur_code {
-                            log::info!("Nạp {} tin nhắn lịch sử (0ms) cho channel {}", history.messages.len(), cur_code);
-                            let mut processed = Vec::new();
-                            let mut prev_author: Option<String> = None;
-                            for m in history.messages {
-                                let author = m.username.clone().unwrap_or_default();
-                                let is_grouped = prev_author.as_ref() == Some(&author) && !author.is_empty();
-                                prev_author = Some(author);
-                                let mut pm = process_message(m, &cache_mgr, &user_avatars);
-                                pm.is_grouped = is_grouped;
-                                processed.push(pm);
-                            }
+                            log::info!("Nạp {} tin nhắn lịch sử (0ms) cho channel {}", processed.len(), cur_code);
                             let window_weak = window_weak.clone();
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(window) = window_weak.upgrade() {
                                     let slint_msgs: Vec<MessageData> = processed.into_iter().map(to_slint_message).collect();
                                     mutate_vec_model(window.get_messages(), |m| window.set_messages(m), |m| m.set_vec(slint_msgs));
+                                    window.set_is_loading_channel(false);
                                 }
                             });
                         }
                     }
                     HavenEvent::NewMessage(new_msg) => {
                         let cur_code = lock_or_recover(&active_channel_code).clone();
+                        let u = new_msg.message.username.clone().unwrap_or_else(|| "Unknown".to_string());
+                        let c = new_msg.message.content.clone().unwrap_or_default();
+                        let mut processed = process_message(new_msg.message, &cache_mgr, &user_avatars);
+                        lock_or_recover(&channel_history_cache).append_if_present(&new_msg.channel_code, processed.clone());
                         if new_msg.channel_code == cur_code {
-                            let u = new_msg.message.username.clone().unwrap_or_else(|| "Unknown".to_string());
-                            let c = new_msg.message.content.clone().unwrap_or_default();
                             log::info!("Tin nhắn mới từ [{}]: {}", u, c);
-                            let mut processed = process_message(new_msg.message, &cache_mgr, &user_avatars);
                             let window_weak = window_weak.clone();
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(window) = window_weak.upgrade() {
@@ -1014,13 +1035,19 @@ async fn start_socket_session(
                                         |m| {
                                             let count = m.row_count();
                                             if count > 0 {
-                                                let last_idx = count - 1;
-                                                if let Some(mut last) = m.row_data(last_idx) {
-                                                    if u == cur_user && last.id.starts_with("opt-") && last.content == c {
-                                                        last.id = processed.id.into();
-                                                        m.set_row_data(last_idx, last);
+                                                let rows: Vec<(String, String, String)> = (0..count)
+                                                    .filter_map(|i| m.row_data(i))
+                                                    .map(|r| (r.id.to_string(), r.author.to_string(), r.content.to_string()))
+                                                    .collect();
+                                                if let Some(opt_idx) = find_reconcile_optimistic_index(&rows, &cur_user, &u, &c) {
+                                                    if let Some(mut opt_row) = m.row_data(opt_idx) {
+                                                        opt_row.id = processed.id.into();
+                                                        opt_row.is_pending = false;
+                                                        m.set_row_data(opt_idx, opt_row);
                                                         return;
                                                     }
+                                                }
+                                                if let Some(last) = m.row_data(count - 1) {
                                                     if last.author == u && !u.is_empty() {
                                                         processed.is_grouped = true;
                                                     }
@@ -1130,6 +1157,7 @@ struct ProcessedMember {
     online: bool,
 }
 
+#[derive(Clone)]
 struct ProcessedMessage {
     id: String,
     author: String,
@@ -1489,6 +1517,7 @@ fn to_slint_message(pm: ProcessedMessage) -> MessageData {
         image_data,
         has_image,
         is_grouped: pm.is_grouped,
+        is_pending: false,
     }
 }
 

@@ -18,6 +18,7 @@ export struct MessageData {
     image-data: image,
     has-image: bool,
     is-grouped: bool,
+    is-pending: bool,
 }
 
 export component ChatArea inherits Rectangle {
@@ -28,6 +29,7 @@ export component ChatArea inherits Rectangle {
     in-out property <string> current-input: "";
     in-out property <[MessageData]> messages: [];
     in-out property <bool> is-voice-connected: false;
+    in-out property <bool> is-loading-channel: false;
 
     callback send-message(string);
     callback pick-attachment();
@@ -150,6 +152,19 @@ export component ChatArea inherits Rectangle {
             background: Theme.divider;
         }
 
+        if root.is-loading-channel: Rectangle {
+            height: 24px;
+            background: #2b2d31;
+
+            Text {
+                text: "Loading messages...";
+                color: Theme.text-muted;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
         // Messages List (Virtualized ListView Viewport)
         msg-flickable := ListView {
             vertical-stretch: 1;
@@ -237,6 +252,7 @@ export component ChatArea inherits Rectangle {
                             if msg.content != "": Text {
                                 text: msg.content;
                                 color: Theme.text-normal;
+                                opacity: msg.is-pending ? 0.62 : 1.0;
                                 font-size: 14px;
                                 wrap: word-wrap;
                             }
