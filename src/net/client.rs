@@ -20,7 +20,7 @@ pub enum OutgoingCommand {
     #[allow(dead_code)]
     GetChannels,
     EnterChannel { code: String },
-    SendMessage { code: String, content: String },
+    SendMessage { code: String, content: String, client_nonce: Option<String> },
     JoinVoice { code: String },
     LeaveVoice { code: String },
     VoiceSpeaking { speaking: bool },
@@ -207,6 +207,13 @@ fn dispatch_socket_event(
                 });
             }
         }
+        "error-msg" => {
+            let msg = payload
+                .and_then(|p| p.as_str())
+                .unwrap_or("Server rejected request")
+                .to_string();
+            let _ = event_tx.send(HavenEvent::Error(msg));
+        }
         _ => {
             log::debug!("Ignored event: {}", event_name);
         }
@@ -239,8 +246,13 @@ async fn write_command(
             let hist = format!("42{}", json!(["get-messages", { "code": code }]));
             write.send(Message::Text(hist)).await
         }
-        OutgoingCommand::SendMessage { code, content } => {
-            let pkt = format!("42{}", json!(["send-message", { "code": code, "content": content }]));
+        OutgoingCommand::SendMessage { code, content, client_nonce } => {
+            let body = if let Some(nonce) = client_nonce {
+                json!({ "code": code, "content": content, "clientNonce": nonce })
+            } else {
+                json!({ "code": code, "content": content })
+            };
+            let pkt = format!("42{}", json!(["send-message", body]));
             write.send(Message::Text(pkt)).await
         }
         OutgoingCommand::JoinVoice { code } => {
@@ -409,9 +421,14 @@ impl HavenSocketClient {
     }
 
     pub fn send_message(&self, code: &str, content: &str) {
+        self.send_message_with_nonce(code, content, None);
+    }
+
+    pub fn send_message_with_nonce(&self, code: &str, content: &str, client_nonce: Option<&str>) {
         let _ = self.cmd_tx.send(OutgoingCommand::SendMessage {
             code: code.to_string(),
             content: content.to_string(),
+            client_nonce: client_nonce.map(str::to_string),
         });
     }
 

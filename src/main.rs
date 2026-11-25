@@ -12,11 +12,15 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use haven_native::cache::{DecodedImageEntry, ImageCacheManager};
-use haven_native::{ChannelHistoryLru, find_reconcile_optimistic_index, lock_or_recover};
+use haven_native::{
+    ChannelHistoryLru, find_reconcile_optimistic_index, format_utc_hhmm, lock_or_recover,
+};
+
+static OPT_NONCE_SEQ: AtomicU64 = AtomicU64::new(1);
 use serde::{Deserialize, Serialize};
 use slint::{Color, Model, VecModel};
 use tokio::sync::mpsc;
@@ -92,7 +96,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let active_channel_code = Arc::new(Mutex::new(String::new()));
     let active_voice_code = Arc::new(Mutex::new(String::new()));
     let channels_cache = Arc::new(Mutex::new(Vec::<ChannelItem>::new()));
-    let channel_history_cache = Arc::new(Mutex::new(ChannelHistoryLru::<ProcessedMessage>::new(12, 80)));
+    let channel_history_cache = Arc::new(Mutex::new(ChannelHistoryLru::<CachedMessageMeta>::new(12, 80)));
     let socket_client_holder = Arc::new(Mutex::new(Option::<Arc<HavenSocketClient>>::None));
     let current_token = Arc::new(Mutex::new(String::new()));
     let api_client = Arc::new(HavenApiClient::new(BASE_URL));
@@ -548,17 +552,27 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
             let code = lock_or_recover(&active_channel_code).clone();
-            log::info!("Gửi tin nhắn tức thì (Optimistic 0ms) tới channel [{}]: {}", code, text);
+            log::info!("Sending message to channel [{}]: {}", code, text);
 
-            // 1. Gửi qua WebSocket
-            let holder = lock_or_recover(&socket_client_holder);
-            if let Some(client) = holder.as_ref() {
-                if !code.is_empty() {
-                    client.send_message(&code, &text);
+            // 1. Dispatch over WebSocket with clientNonce when connected and channel selected
+            let sent_nonce = {
+                let holder = lock_or_recover(&socket_client_holder);
+                if let Some(client) = holder.as_ref().filter(|_| !code.is_empty()) {
+                    let seq = OPT_NONCE_SEQ.fetch_add(1, Ordering::Relaxed);
+                    let nonce = format!("opt_{}_{}", chrono::Utc::now().timestamp_millis(), seq);
+                    client.send_message_with_nonce(&code, &text, Some(&nonce));
+                    Some(nonce)
+                } else {
+                    None
                 }
-            }
+            };
 
-            // 2. Hiển thị ngay lập tức trên UI (0ms delay)
+            let Some(nonce) = sent_nonce else {
+                log::warn!("Skipped optimistic append: socket disconnected or channel empty");
+                return;
+            };
+
+            // 2. Render optimistic pending message immediately on UI thread
             if let Some(window) = window_weak.upgrade() {
                 let cur_user = window.get_current_username().to_string();
                 let cur_av_text = window.get_current_user_avatar_text().to_string();
@@ -566,7 +580,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let has_av = window.get_has_current_user_avatar();
                 let cur_av_img = window.get_current_user_avatar();
 
-                let now = chrono::Local::now();
+                let now = chrono::Utc::now();
                 let time_str = now.format("%H:%M").to_string();
 
                 mutate_vec_model(
@@ -582,7 +596,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         let opt_msg = MessageData {
-                            id: format!("opt-{}", now.timestamp_millis()).into(),
+                            id: nonce.into(),
                             author: cur_user.into(),
                             avatar_text: cur_av_text.into(),
                             avatar_color: cur_av_color,
@@ -711,13 +725,14 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let active_voice_code = active_voice_code.clone();
         let channels_cache = channels_cache.clone();
         let channel_history_cache = channel_history_cache.clone();
+        let cache_mgr = cache_mgr.clone();
         let audio_engine = audio_engine.clone();
         let audio_channels = audio_channels.clone();
         let window_weak = main_window.as_weak();
 
         main_window.on_channel_selected(move |channel_id, is_voice| {
             let code = channel_id.to_string();
-            log::info!("Đã chọn channel: {} (voice: {})", code, is_voice);
+            log::info!("Selected channel: {} (voice: {})", code, is_voice);
 
             if is_voice {
                 if let Some(window) = window_weak.upgrade() {
@@ -739,6 +754,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                     cache.iter().find(|c| c.code == code).map(|c| (c.name.clone(), c.topic.clone().unwrap_or_default()))
                 };
                 let cached_history = lock_or_recover(&channel_history_cache).get(&code);
+                let cache_mgr_ui = cache_mgr.clone();
 
                 let window_weak_ui = window_weak.clone();
                 let code_clone = code.clone();
@@ -749,8 +765,11 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                             window.set_active_channel_name(name.into());
                             window.set_channel_topic(topic.into());
                         }
-                        if let Some(cached_msgs) = cached_history {
-                            let slint_msgs: Vec<MessageData> = cached_msgs.into_iter().map(to_slint_message).collect();
+                        if let Some(cached_metas) = cached_history {
+                            let slint_msgs: Vec<MessageData> = cached_metas
+                                .into_iter()
+                                .map(|meta| to_slint_message(hydrate_cached_message(meta, &cache_mgr_ui)))
+                                .collect();
                             mutate_vec_model(window.get_messages(), |m| window.set_messages(m), |m| m.set_vec(slint_msgs));
                             window.set_is_loading_channel(false);
                         } else {
@@ -841,7 +860,7 @@ async fn start_socket_session(
     active_channel_code: Arc<Mutex<String>>,
     active_voice_code: Arc<Mutex<String>>,
     channels_cache: Arc<Mutex<Vec<ChannelItem>>>,
-    channel_history_cache: Arc<Mutex<ChannelHistoryLru<ProcessedMessage>>>,
+    channel_history_cache: Arc<Mutex<ChannelHistoryLru<CachedMessageMeta>>>,
     user_avatars: Arc<Mutex<HashMap<String, String>>>,
     cache_mgr: Arc<ImageCacheManager>,
 ) {
@@ -867,7 +886,8 @@ async fn start_socket_session(
             while let Some(event) = event_rx.recv().await {
                 match event {
                     HavenEvent::Connected(sid) => {
-                        log::info!("WebSocket đã kết nối. SID: {}", sid);
+                        log::info!("WebSocket connected. SID: {}", sid);
+                        lock_or_recover(&channel_history_cache).clear();
                     }
                     HavenEvent::SessionInfo(user_info) => {
                         log::info!("Nhận SessionInfo: id={} username={} avatar={:?} status={:?}",
@@ -993,64 +1013,114 @@ async fn start_socket_session(
                         });
                     }
                     HavenEvent::MessageHistory(history) => {
+                        let event_code = history.channel_code.clone();
                         let cur_code = lock_or_recover(&active_channel_code).clone();
-                        let mut processed = Vec::new();
+                        let mut cached_metas = Vec::with_capacity(history.messages.len());
                         let mut prev_author: Option<String> = None;
                         for m in history.messages {
                             let author = m.username.clone().unwrap_or_default();
                             let is_grouped = prev_author.as_ref() == Some(&author) && !author.is_empty();
                             prev_author = Some(author);
-                            let mut pm = process_message(m, &cache_mgr, &user_avatars);
-                            pm.is_grouped = is_grouped;
-                            processed.push(pm);
+                            let mut meta = extract_cached_meta(m, &user_avatars);
+                            meta.is_grouped = is_grouped;
+                            cached_metas.push(meta);
                         }
-                        lock_or_recover(&channel_history_cache).put(history.channel_code.clone(), processed.clone());
-                        if history.channel_code == cur_code {
-                            log::info!("Nạp {} tin nhắn lịch sử (0ms) cho channel {}", processed.len(), cur_code);
+                        lock_or_recover(&channel_history_cache).put(event_code.clone(), cached_metas.clone());
+                        if event_code == cur_code {
+                            let processed: Vec<ProcessedMessage> = cached_metas
+                                .into_iter()
+                                .map(|meta| hydrate_cached_message(meta, &cache_mgr))
+                                .collect();
+                            log::info!("Loaded {} history messages for channel {}", processed.len(), cur_code);
                             let window_weak = window_weak.clone();
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(window) = window_weak.upgrade() {
+                                    if window.get_active_channel_code().as_str() != event_code {
+                                        return;
+                                    }
                                     let slint_msgs: Vec<MessageData> = processed.into_iter().map(to_slint_message).collect();
-                                    mutate_vec_model(window.get_messages(), |m| window.set_messages(m), |m| m.set_vec(slint_msgs));
+                                    mutate_vec_model(
+                                        window.get_messages(),
+                                        |m| window.set_messages(m),
+                                        |m| {
+                                            let unchanged = m.row_count() == slint_msgs.len()
+                                                && (0..m.row_count()).all(|i| {
+                                                    m.row_data(i).is_some_and(|cur| {
+                                                        let next = &slint_msgs[i];
+                                                        !cur.is_pending
+                                                            && cur.id == next.id
+                                                            && cur.content == next.content
+                                                            && cur.has_avatar == next.has_avatar
+                                                            && cur.has_image == next.has_image
+                                                    })
+                                                });
+                                            if !unchanged {
+                                                m.set_vec(slint_msgs);
+                                            }
+                                        },
+                                    );
                                     window.set_is_loading_channel(false);
                                 }
                             });
                         }
                     }
                     HavenEvent::NewMessage(new_msg) => {
+                        let event_code = new_msg.channel_code.clone();
                         let cur_code = lock_or_recover(&active_channel_code).clone();
                         let u = new_msg.message.username.clone().unwrap_or_else(|| "Unknown".to_string());
                         let c = new_msg.message.content.clone().unwrap_or_default();
-                        let mut processed = process_message(new_msg.message, &cache_mgr, &user_avatars);
-                        lock_or_recover(&channel_history_cache).append_if_present(&new_msg.channel_code, processed.clone());
-                        if new_msg.channel_code == cur_code {
-                            log::info!("Tin nhắn mới từ [{}]: {}", u, c);
+                        let client_nonce = new_msg.client_nonce.clone();
+                        let mut meta = extract_cached_meta(new_msg.message, &user_avatars);
+                        {
+                            let mut cache = lock_or_recover(&channel_history_cache);
+                            if let Some(prev) = cache.last_cloned(&event_code) {
+                                if prev.id != meta.id && prev.author == meta.author && !meta.author.is_empty() {
+                                    meta.is_grouped = true;
+                                }
+                            }
+                            cache.append_or_update_by_id(&event_code, meta.clone(), |m| m.id.clone());
+                        }
+                        if event_code == cur_code {
+                            let mut processed = hydrate_cached_message(meta, &cache_mgr);
+                            log::info!("New message from [{}]: {}", u, c);
                             let window_weak = window_weak.clone();
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(window) = window_weak.upgrade() {
+                                    if window.get_active_channel_code().as_str() != event_code {
+                                        return;
+                                    }
                                     let cur_user = window.get_current_username().to_string();
                                     mutate_vec_model(
                                         window.get_messages(),
                                         |m| window.set_messages(m),
                                         |m| {
                                             let count = m.row_count();
-                                            if count > 0 {
-                                                let rows: Vec<(String, String, String)> = (0..count)
-                                                    .filter_map(|i| m.row_data(i))
-                                                    .map(|r| (r.id.to_string(), r.author.to_string(), r.content.to_string()))
-                                                    .collect();
-                                                if let Some(opt_idx) = find_reconcile_optimistic_index(&rows, &cur_user, &u, &c) {
-                                                    if let Some(mut opt_row) = m.row_data(opt_idx) {
-                                                        opt_row.id = processed.id.into();
-                                                        opt_row.is_pending = false;
-                                                        m.set_row_data(opt_idx, opt_row);
-                                                        return;
-                                                    }
-                                                }
-                                                if let Some(last) = m.row_data(count - 1) {
-                                                    if last.author == u && !u.is_empty() {
-                                                        processed.is_grouped = true;
-                                                    }
+                                            let rows: Vec<(String, String, String)> = (0..count)
+                                                .filter_map(|i| m.row_data(i))
+                                                .map(|r| (r.id.to_string(), r.author.to_string(), r.content.to_string()))
+                                                .collect();
+                                            if let Some(opt_idx) = find_reconcile_optimistic_index(
+                                                &rows,
+                                                client_nonce.as_deref(),
+                                                &cur_user,
+                                                &u,
+                                                &c,
+                                            ) {
+                                                let prev_author = opt_idx
+                                                    .checked_sub(1)
+                                                    .and_then(|i| m.row_data(i))
+                                                    .map(|r| r.author.to_string());
+                                                processed.is_grouped =
+                                                    prev_author.as_deref() == Some(u.as_str()) && !u.is_empty();
+                                                m.set_row_data(opt_idx, to_slint_message(processed));
+                                                return;
+                                            }
+                                            if rows.iter().any(|(id, _, _)| id == &processed.id) {
+                                                return;
+                                            }
+                                            if let Some(last) = m.row_data(count.saturating_sub(1)) {
+                                                if count > 0 && last.author == u && !u.is_empty() {
+                                                    processed.is_grouped = true;
                                                 }
                                             }
                                             m.push(to_slint_message(processed));
@@ -1092,8 +1162,35 @@ async fn start_socket_session(
                     HavenEvent::VoiceSpeaking { user_id, speaking } => {
                         log::debug!("Trạng thái nói: user {:?} -> {}", user_id, speaking);
                     }
+                    HavenEvent::Error(err_msg) => {
+                        log::warn!("Server rejected action: {}", err_msg);
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(window) = window_weak.upgrade() {
+                                window.set_is_loading_channel(false);
+                                mutate_vec_model(
+                                    window.get_messages(),
+                                    |m| window.set_messages(m),
+                                    |m| {
+                                        if let Some(idx) = (0..m.row_count()).rev().find(|&i| {
+                                            m.row_data(i).is_some_and(|r| r.is_pending || r.id.starts_with("opt"))
+                                        }) {
+                                            m.remove(idx);
+                                        }
+                                    },
+                                );
+                            }
+                        });
+                    }
                     HavenEvent::Disconnected(reason) => {
-                        log::warn!("Mất kết nối WebSocket: {}", reason);
+                        log::warn!("WebSocket disconnected: {}", reason);
+                        lock_or_recover(&channel_history_cache).clear();
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(window) = window_weak.upgrade() {
+                                window.set_is_loading_channel(false);
+                            }
+                        });
                     }
                 }
             }
@@ -1155,6 +1252,23 @@ struct ProcessedMember {
     status_text: String,
     is_bot: bool,
     online: bool,
+}
+
+#[derive(Clone)]
+struct CachedMessageMeta {
+    id: String,
+    author: String,
+    avatar_text: String,
+    avatar_color: Color,
+    avatar_url: Option<String>,
+    timestamp: String,
+    content: String,
+    is_bot: bool,
+    is_attachment: bool,
+    attachment_url: String,
+    attachment_name: String,
+    is_image: bool,
+    is_grouped: bool,
 }
 
 #[derive(Clone)]
@@ -1423,19 +1537,19 @@ fn refresh_cached_ui(
     }
 }
 
-fn process_message(
+fn extract_cached_meta(
     m: ChatMessageItem,
-    cache_mgr: &Arc<ImageCacheManager>,
     user_avatars: &Arc<Mutex<HashMap<String, String>>>,
-) -> ProcessedMessage {
+) -> CachedMessageMeta {
     let username = m.username.unwrap_or_else(|| "Unknown".to_string());
     let raw_content = m.content.unwrap_or_default();
     let created_at = m.created_at.unwrap_or_default();
 
-    let (content, is_attachment, is_image, attachment_url, attachment_name) = parse_attachment_content(&raw_content);
+    let (content, is_attachment, is_image, attachment_url, attachment_name) =
+        parse_attachment_content(&raw_content);
 
-    let initials = if username.len() >= 2 {
-        username[..2].to_uppercase()
+    let initials = if username.chars().count() >= 2 {
+        username.chars().take(2).collect::<String>().to_uppercase()
     } else {
         username.to_uppercase()
     };
@@ -1447,34 +1561,22 @@ fn process_message(
         Color::from_rgb_u8(35, 165, 90) // Discord Green
     };
 
-    let time_str = if created_at.len() >= 16 {
-        created_at[11..16].to_string()
-    } else {
-        created_at
-    };
+    let time_str = format_utc_hhmm(&created_at);
 
     let avatar_url = if let Some(av) = m.avatar {
-        lock_or_recover(&user_avatars).insert(username.clone(), av.clone());
+        lock_or_recover(user_avatars).insert(username.clone(), av.clone());
         Some(av)
     } else {
-        let map = lock_or_recover(&user_avatars);
+        let map = lock_or_recover(user_avatars);
         map.get(&username).cloned()
     };
 
-    let avatar_entry = avatar_url.and_then(|av| cache_mgr.get_or_fetch(&av, true));
-
-    let image_entry = if is_image && !attachment_url.is_empty() {
-        cache_mgr.get_or_fetch(&attachment_url, false)
-    } else {
-        None
-    };
-
-    ProcessedMessage {
+    CachedMessageMeta {
         id: format!("{}", m.id),
         author: username,
         avatar_text: initials,
         avatar_color: color,
-        avatar_entry,
+        avatar_url,
         timestamp: time_str,
         content,
         is_bot,
@@ -1482,8 +1584,33 @@ fn process_message(
         attachment_url,
         attachment_name,
         is_image,
-        image_entry,
         is_grouped: false,
+    }
+}
+
+fn hydrate_cached_message(meta: CachedMessageMeta, cache_mgr: &ImageCacheManager) -> ProcessedMessage {
+    let avatar_entry = meta.avatar_url.as_deref().and_then(|av| cache_mgr.get_or_fetch(av, true));
+    let image_entry = if meta.is_image && !meta.attachment_url.is_empty() {
+        cache_mgr.get_or_fetch(&meta.attachment_url, false)
+    } else {
+        None
+    };
+
+    ProcessedMessage {
+        id: meta.id,
+        author: meta.author,
+        avatar_text: meta.avatar_text,
+        avatar_color: meta.avatar_color,
+        avatar_entry,
+        timestamp: meta.timestamp,
+        content: meta.content,
+        is_bot: meta.is_bot,
+        is_attachment: meta.is_attachment,
+        attachment_url: meta.attachment_url,
+        attachment_name: meta.attachment_name,
+        is_image: meta.is_image,
+        image_entry,
+        is_grouped: meta.is_grouped,
     }
 }
 

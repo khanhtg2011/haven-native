@@ -59,6 +59,8 @@ pub struct NewMessageEvent {
     #[serde(rename = "channelCode")]
     pub channel_code: String,
     pub message: ChatMessageItem,
+    #[serde(rename = "clientNonce", default)]
+    pub client_nonce: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,5 +142,6 @@ pub enum HavenEvent {
     VoiceSpeaking { user_id: Option<i64>, speaking: bool },
     VoiceUsersUpdate { channel_code: String, users: Vec<serde_json::Value> },
     PingRtt(u32),
+    Error(String),
     Disconnected(String),
 }
